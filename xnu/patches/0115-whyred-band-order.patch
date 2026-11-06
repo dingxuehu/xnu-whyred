@@ -1,0 +1,68 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -892,8 +892,14 @@
+ #if defined(SWEET)
+ /* whyred: paint a band whose colour comes from a register. */
+ .macro SWEET_BAND_V row, colreg
++	/*
++	 * whyred 0115: colour first.  The address goes into x6, so a caller that
++	 * keeps its colour in x6 -- which is every check in this file and the whole
++	 * fault reporter -- would otherwise have x7 loaded with the address and
++	 * paint something almost black.  That is why 0114's reporter looked silent.
++	 */
++	mov		x7, \colreg
+ 	MOV64	x6, (0x9d400000 + (\row) * 4320)
+-	mov		x7, \colreg
+ 	mov		x8, #32
+ 	mov		x9, #4320
+ 1:	mov		x10, #64
+@@ -1299,8 +1305,9 @@
+  * in the file.
+  */
+ .macro SWEET_BAND_X row, xoff, colreg
++	/* whyred 0115: colour first, for the same reason as SWEET_BAND_V. */
++	mov		x7, \colreg
+ 	MOV64	x6, (0x9d400000 + (\row) * 4320 + (\xoff) * 4)
+-	mov		x7, \colreg
+ 	mov		x8, #32
+ 	mov		x9, #4320
+ 1:	mov		x10, #64
+@@ -1354,9 +1361,14 @@
+ 	MOV64	x8, 0xff000000
+ 	csel	x6, x7, x8, eq
+ 	SWEET_BAND_X 640, 16, x6
+-	and		x9, x4, #0x3
+-	cmp		x9, #0x3
+-	b.ne		.Lw0114_no_table
++	/*
++	 * whyred 0115: no longer branch away when the descriptor does not look like
++	 * a table.  0114 did, so a read path that was wrong meant nothing was
++	 * cleared -- and a boot that hangs at the first SCTLR_EL1 write with no
++	 * exception report is exactly what a set PXN bit looks like.  The five
++	 * checks above still say what the read saw; the clear now happens either
++	 * way, because getting past the MMU enable is the point.
++	 */
+ 	ldr		x4, [x5, #(88 * 8)]		/* the kernel's 32MB block */
+ 	/* x=240: valid | block */
+ 	MOV64	x7, 0xff00ff00
+@@ -1418,6 +1430,19 @@
+ #endif
+ 	MSR_SCTLR_EL1_X0
+ 	isb		sy
++#if defined(SWEET)
++	/*
++	 * whyred 0115: did the write itself return, and can the core still fetch?
++	 * This band is the first thing executed with M=1, so it answers both at
++	 * once.  If it appears, the core fetched instructions after the MMU came
++	 * on, which clears PXN of suspicion; if it does not, the write or the fetch
++	 * right after it is where the port stops.  It is painted over the tail of
++	 * 0112's black band at 440, painted long before, so it reads as a white
++	 * notch in black -- and the band's own store is a framebuffer write under
++	 * the new translation regime, which is itself worth knowing about.
++	 */
++	SWEET_BAND 460, 0xffffffff
++#endif
+ #if defined(SWEET)
+ 	/* whyred D: MMU and caches on (magenta) */
+ 	SWEET_BAND 240, 0xffff00ff

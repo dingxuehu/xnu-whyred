@@ -1,0 +1,74 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -888,6 +888,70 @@
+ #if defined(SWEET)
+ 	/* whyred C5: about to enable the MMU (orange) */
+ 	SWEET_BAND 340, 0xffff8000
++#endif
++#if defined(SWEET)
++/* whyred: paint a band whose colour comes from a register. */
++.macro SWEET_BAND_V row, colreg
++	MOV64	x6, (0x9d400000 + (\row) * 4320)
++	mov		x7, \colreg
++	mov		x8, #32
++	mov		x9, #4320
++1:	mov		x10, #64
++	mov		x11, x6
++2:	str		w7, [x11], #4
++	subs	x10, x10, #1
++	b.ne	2b
++	add		x6, x6, x9
++	subs	x8, x8, #1
++	b.ne	1b
++	dsb		sy
++.endm
++#endif
++
++#if defined(SWEET)
++	/*
++	 * whyred: where is the V=P L2 table, really?  Green = pass, black = fail.
++	 * (0102 painted failures red on a red screen: invisible.)
++	 */
++	MOV64	x12, 0xff00ff00			// pass
++	MOV64	x13, 0xff000000			// fail
++	adrp	x1, EXT(bootstrap_pagetables)@page
++	add		x1, x1, EXT(bootstrap_pagetables)@pageoff
++	ldr		x2, [x1]
++	and		x3, x2, #0x3
++	cmp		x3, #0x3
++	csel	x9, x12, x13, eq
++	SWEET_BAND_V 1000, x9
++	and		x5, x2, #(ARM_TTE_TABLE_MASK)
++	MOV64	x6, 0x8000
++	add		x6, x1, x6
++	cmp		x5, x6
++	csel	x9, x12, x13, eq
++	SWEET_BAND_V 1020, x9
++	MOV64	x6, 0x4000
++	add		x6, x1, x6
++	cmp		x5, x6
++	csel	x9, x12, x13, eq
++	SWEET_BAND_V 1040, x9
++	MOV64	x6, 0xc000
++	add		x6, x1, x6
++	cmp		x5, x6
++	csel	x9, x12, x13, eq
++	SWEET_BAND_V 1060, x9
++	ldr		x7, [x5, #(88 * 8)]		// real L2 entry for 0xb0000000
++	lsr		x8, x7, #25
++	cmp		x8, #0x58
++	csel	x9, x12, x13, eq
++	SWEET_BAND_V 1080, x9
++	ldr		x7, [x5, #(78 * 8)]		// real L2 entry for 0x9c000000
++	lsr		x8, x7, #25
++	cmp		x8, #0x4e
++	csel	x9, x12, x13, eq
++	SWEET_BAND_V 1100, x9
++	and		x8, x7, #0x400			// AF
++	cmp		x8, #0x400
++	csel	x9, x12, x13, eq
++	SWEET_BAND_V 1120, x9
+ #endif
+ #if defined(SWEET)
+ 	/* whyred: what does the CPU actually hold before SCTLR.M? */

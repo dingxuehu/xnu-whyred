@@ -1,0 +1,29 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -1022,12 +1022,25 @@
+ 	/* whyred C6: image and page tables invalidated from the D-cache */
+ 	SWEET_BAND 360, 0xff7fff00
+ #endif
++#if defined(SWEET)
++	/* whyred 1/2: translation only, I and C still off. */
++	MOV64	x0, (SCTLR_EL1_DEFAULT & ~(SCTLR_C_ENABLED | SCTLR_I_ENABLED))
++#else
+ 	MOV64   x0, SCTLR_EL1_DEFAULT
++#endif
+ 	MSR_SCTLR_EL1_X0
+ 	isb		sy
+ #if defined(SWEET)
+ 	/* whyred D: MMU and caches on (magenta) */
+ 	SWEET_BAND 240, 0xffff00ff
++#endif
++#if defined(SWEET)
++	/* whyred 2/2: caches on, same mapping. */
++	MOV64	x0, SCTLR_EL1_DEFAULT
++	MSR_SCTLR_EL1_X0
++	isb		sy
++	/* whyred D3: caches on (green) */
++	SWEET_BAND 420, 0xff00ff00
+ #endif
+ #if defined(SWEET)
+ 	/* whyred: real vectors from here on. */

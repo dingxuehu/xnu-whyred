@@ -1,0 +1,46 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -1007,6 +1007,42 @@
+ #endif
+ #if defined(SWEET)
+ 	/*
++	 * whyred EL2 probe: is a hypervisor / stage-2 translation in the way?
++	 * Green = supported/on, black = not.  EL2 sysreg reads from EL1 either
++	 * succeed (EL2 present, EL1 allowed), UNDEF (EL2 absent -> low vector
++	 * paints its black bar), or trap to EL2 (silent death = EL2 rule-in).
++	 * SWEET_BAND_V is defined by 0107.
++	 */
++	MOV64	x12, 0xff00ff00			// pass
++	MOV64	x13, 0xff000000			// fail
++	mrs		x14, id_aa64pfr0_el1
++	lsr		x10, x14, #16
++	and		x10, x10, #0xf			// EL3 support
++	cmp		x10, #0
++	csel	x9, x12, x13, ne
++	SWEET_BAND_V 1200, x9
++	lsr		x10, x14, #12
++	and		x10, x10, #0xf			// EL2 support
++	cmp		x10, #0
++	csel	x9, x12, x13, ne
++	SWEET_BAND_V 1220, x9
++	mrs		x15, sctlr_el2			// may UNDEF / trap to EL2
++	SWEET_BAND_V 1240, x12		// painted: the read above returned
++	tst		x15, #0x1				// SCTLR_EL2.M
++	csel	x9, x12, x13, ne
++	SWEET_BAND_V 1260, x9
++	mrs		x14, vttbr_el2
++	cmp		x14, #0
++	csel	x9, x12, x13, ne
++	SWEET_BAND_V 1280, x9
++	mrs		x14, hcr_el2			// EL2 visible to EL1 at all?
++	SWEET_BAND_V 1300, x12		// painted: HCR_EL2 was readable
++	tst		x14, #0x1				// HCR_EL2.VM: stage-2 translation on
++	csel	x9, x13, x12, ne		// green = VM clear = stage-2 OFF (good)
++	SWEET_BAND_V 1320, x9
++#endif
++#if defined(SWEET)
++	/*
+ 	 * whyred: nothing has invalidated the D-cache before we enable it. ABL
+ 	 * and the shim's uncached copies can leave stale lines over the image and
+ 	 * the bootstrap page tables, and the first page-table walk after SCTLR.M

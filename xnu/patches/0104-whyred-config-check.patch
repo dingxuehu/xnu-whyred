@@ -1,0 +1,62 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -890,6 +890,58 @@
+ 	SWEET_BAND 340, 0xffff8000
+ #endif
+ #if defined(SWEET)
++	/* whyred: what does the CPU actually hold before SCTLR.M? */
++	mrs		x9, currentel
++	cmp		x9, #0x4
++	b.ne	71f
++	SWEET_BAND 700, 0xff00ff00
++	b		72f
++71:	SWEET_BAND 700, 0xffff0000
++72:
++	mrs		x9, id_aa64mmfr0_el1
++	lsr		x9, x9, #20
++	and		x9, x9, #0xf
++	cmp		x9, #0xf
++	b.eq	73f
++	SWEET_BAND 720, 0xff00ff00
++	b		74f
++73:	SWEET_BAND 720, 0xffff0000
++74:
++	mrs		x9, ttbr0_el1
++	and		x10, x9, #(TTBR_BADDR_MASK)
++	and		x11, x25, #(TTBR_BADDR_MASK)
++	cmp		x10, x11
++	b.ne	75f
++	SWEET_BAND 740, 0xff00ff00
++	b		76f
++75:	SWEET_BAND 740, 0xffff0000
++76:
++	lsr		x10, x9, #48
++	cbz		x10, 77f
++	SWEET_BAND 760, 0xffff0000
++	b		78f
++77:	SWEET_BAND 760, 0xff00ff00
++78:
++	mrs		x9, ttbr1_el1
++	and		x10, x9, #(TTBR_BADDR_MASK)
++	add		x11, x25, #0x4, lsl #12
++	and		x11, x11, #(TTBR_BADDR_MASK)
++	cmp		x10, x11
++	b.ne	79f
++	SWEET_BAND 780, 0xff00ff00
++	b		80f
++79:	SWEET_BAND 780, 0xffff0000
++80:
++	mrs		x9, tcr_el1
++	MOV64	x10, 0x226511a511
++	cmp		x9, x10
++	b.ne	81f
++	SWEET_BAND 800, 0xff00ff00
++	b		82f
++81:	SWEET_BAND 800, 0xffff0000
++82:
++#endif
++#if defined(SWEET)
+ 	/*
+ 	 * whyred: nothing has invalidated the D-cache before we enable it. ABL
+ 	 * and the shim's uncached copies can leave stale lines over the image and

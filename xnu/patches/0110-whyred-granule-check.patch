@@ -1,0 +1,70 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -962,14 +962,20 @@
+ 	b		72f
+ 71:	SWEET_BAND 700, 0xffff0000
+ 72:
+-	mrs		x9, id_aa64mmfr0_el1
+-	lsr		x9, x9, #20
+-	and		x9, x9, #0xf
+-	cmp		x9, #0xf
+-	b.eq	73f
++	mrs		x14, id_aa64mmfr0_el1
++	lsr		x9, x14, #20
++	and		x9, x9, #0xf			// TGran16
++	cmp		x9, #0x1			// 0x1..0xf supported; 0x0 = NOT supported
++	b.eq		.Lw_g16_ok
++	cbz		x9, .Lw_g16_no
++	SWEET_BAND 720, 0xffff00ff		// unexpected encoding
++	b		.Lw_g16_done
++.Lw_g16_ok:
+ 	SWEET_BAND 720, 0xff00ff00
+-	b		74f
+-73:	SWEET_BAND 720, 0xffff0000
++	b		.Lw_g16_done
++.Lw_g16_no:
++	SWEET_BAND 720, 0xff000000
++.Lw_g16_done:
+ 74:
+ 	mrs		x9, ttbr0_el1
+ 	and		x10, x9, #(TTBR_BADDR_MASK)
+@@ -1004,6 +1010,38 @@
+ 	b		82f
+ 81:	SWEET_BAND 800, 0xffff0000
+ 82:
++	/*
++	 * whyred 0110: what granules does this CPU actually implement, and what
++	 * is the raw TGran16 nibble?  (See the header of 0110 for why 0104's
++	 * "!= 0xf" test could not answer this.)  x14 survives SWEET_BAND_V.
++	 */
++	mrs		x14, id_aa64mmfr0_el1
++	MOV64	x12, 0xff00ff00			// pass
++	MOV64	x13, 0xff000000			// fail
++	lsr		x9, x14, #28
++	and		x9, x9, #0xf			// TGran4
++	cmp		x9, #0
++	csel	x10, x12, x13, eq
++	SWEET_BAND_V 820, x10
++	lsr		x9, x14, #24
++	and		x9, x9, #0xf			// TGran64
++	cmp		x9, #0
++	csel	x10, x12, x13, eq
++	SWEET_BAND_V 840, x10
++	lsr		x9, x14, #20
++	and		x9, x9, #0xf			// raw TGran16, bit by bit
++	tst		x9, #0x1
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 860, x10
++	tst		x9, #0x2
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 880, x10
++	tst		x9, #0x4
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 900, x10
++	tst		x9, #0x8
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 920, x10
+ #endif
+ #if defined(SWEET)
+ 	/*

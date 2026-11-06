@@ -1,0 +1,164 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -223,6 +223,30 @@
+ 	b	EXT(start_first_cpu)
+ 
+ 
++#if defined(SWEET)
++/*
++ * whyred bring-up markers. The panel is 1080x2160, so only rows < 2160 are
++ * visible (patch 0010 draws its stage-0 band at row 2368: never on screen).
++ * SWEET_BAND paints a 64x32 band with x6-x11 only, so it works with the MMU
++ * off, before any page table or stack exists, and never clobbers live state.
++ */
++.macro SWEET_BAND row, color
++	MOV64	x6, (0x9d400000 + (\row) * 4320)
++	MOV64	x7, \color
++	mov		x8, #32
++	mov		x9, #4320
++1:	mov		x10, #64
++	mov		x11, x6
++2:	str		w7, [x11], #4
++	subs	x10, x10, #1
++	b.ne	2b
++	add		x6, x6, x9
++	subs	x8, x8, #1
++	b.ne	1b
++	dsb		sy
++.endm
++#endif
++
+ /*
+  * Provides an early-boot exception vector so that the processor will spin
+  * and preserve exception information (e.g., ELR_EL1) when early CPU bootstrap
+@@ -233,39 +257,44 @@
+ 	.global	EXT(LowExceptionVectorBase)
+ LEXT(LowExceptionVectorBase)
+ 	/* EL1 SP 0 */
+-	b		.
+-	.align	7
+-	b		.
+-	.align	7
+-	b		.
+-	.align	7
+-	b		.
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
+ 	/* EL1 SP1 */
+ 	.align	7
+-	b		.
+-	.align	7
+-	b		.
+-	.align	7
+-	b		.
+-	.align	7
+-	b		.
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
+ 	/* EL0 64 */
+ 	.align	7
+-	b		.
+-	.align	7
+-	b		.
+-	.align	7
+-	b		.
+-	.align	7
+-	b		.
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
+ 	/* EL0 32 */
+ 	.align	7
+-	b		.
+-	.align	7
+-	b		.
+-	.align	7
+-	b		.
+-	.align	7
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
++	.align	7
++	b		.Lsweet_low_hang
++	/* whyred: any early exception paints this, then stops. */
++.Lsweet_low_hang:
++	SWEET_BAND 400, 0xff000000
++	SWEET_BAND 440, 0xff000000
+ 	b		.
+ 	.align 12, 0
+ 
+@@ -464,8 +493,12 @@
+ 	mov		x21, #0
+ 
+ #if defined(SWEET)
++	/* whyred A: start_first_cpu entered (white) */
++	SWEET_BAND 120, 0xffffffff
++#endif
++#if defined(SWEET)
+ 	/* Stage 0: white 64x32 band, no stack or page tables needed. */
+-	MOV64	x0, (0x9d400000 + 2368 * 4320)
++	MOV64	x0, (0x9d400000 + 2096 * 4320)
+ 	mov		w1, #-1
+ 	mov		x2, #32
+ 	mov		x4, #4320
+@@ -591,6 +624,10 @@
+ 	sub		x24, x24, x18
+ 	add		x22, x22, x18
+ 	add		x23, x23, x18
++#if defined(SWEET)
++	/* whyred B: kernel base adjusted (green) */
++	SWEET_BAND 160, 0xff00ff00
++#endif
+ 
+ 	/*
+ 	 * x0  - V=P virtual cursor
+@@ -645,6 +682,10 @@
+ 	str		x11, [x13, x12, lsl #TTE_SHIFT]
+ #endif
+ 
++#if defined(SWEET)
++	/* whyred C: bootstrap page tables built (blue) */
++	SWEET_BAND 200, 0xff0000ff
++#endif
+ 	/* Ensure TTEs are visible */
+ 	dsb		ish
+ 
+@@ -780,6 +821,10 @@
+ 	MOV64   x0, SCTLR_EL1_DEFAULT
+ 	MSR_SCTLR_EL1_X0
+ 	isb		sy
++#if defined(SWEET)
++	/* whyred D: MMU and caches on (magenta) */
++	SWEET_BAND 240, 0xffff00ff
++#endif
+ 
+ #if !VMAPPLE && !defined(SWEET)
+ 	MOV64   x1, SCTLR_EL1_DEFAULT
+@@ -844,6 +889,10 @@
+ #endif
+ 
+ 	// Return to arm_init()
++#if defined(SWEET)
++	/* whyred E: jumping to arm_init (yellow) */
++	SWEET_BAND 280, 0xffffff00
++#endif
+ 	ret
+ 
+ Ltrampoline:

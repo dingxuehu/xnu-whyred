@@ -1,0 +1,28 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -831,6 +831,24 @@
+ #if defined(SWEET)
+ 	/* whyred C5: about to enable the MMU (orange) */
+ 	SWEET_BAND 340, 0xffff8000
++#endif
++#if defined(SWEET)
++	/*
++	 * whyred: nothing has invalidated the D-cache before we enable it. ABL
++	 * and the shim's uncached copies can leave stale lines over the image and
++	 * the bootstrap page tables, and the first page-table walk after SCTLR.M
++	 * would read those. With the MMU off VA == PA, so invalidate by VA.
++	 */
++	mov		x9, x23					// physical base of the mach header
++	MOV64	x10, 0x2000000
++	add		x10, x9, x10
++9:	dc		ivac, x9
++	add		x9, x9, #64
++	cmp		x9, x10
++	b.lo	9b
++	dsb		sy
++	/* whyred C6: image and page tables invalidated from the D-cache */
++	SWEET_BAND 360, 0xff7fff00
+ #endif
+ 	MOV64   x0, SCTLR_EL1_DEFAULT
+ 	MSR_SCTLR_EL1_X0

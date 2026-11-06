@@ -1,0 +1,46 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -1423,6 +1423,32 @@
+ 	SWEET_BAND 360, 0xff7fff00
+ #endif
+ #if defined(SWEET)
++	/*
++	 * whyred 0116: is HCR_EL2.TVM trapping this kernel's system-register
++	 * access?  At EL1, TVM sends reads of TTBR0_EL1, TTBR1_EL1 and TCR_EL1,
++	 * and writes of those plus SCTLR_EL1, to EL2.  A trap taken to EL2 never
++	 * reaches the reporter armed below, so it looks exactly like a hang --
++	 * which is what 0114 and 0115 both looked like, and what the console
++	 * supports: the shim printed SCTLR as 0x34544938, M=0, and only read it.
++	 *
++	 * Three narrow marks on row 460, before the SCTLR_EL1 write:
++	 *   x=16   green : the probe was reached
++	 *   x=240  white : the TTBR0_EL1 read returned
++	 *   x=464  cyan  : the TTBR0_EL1 write returned
++	 * The write puts back the value just read, so it is a no-op if it works,
++	 * and if the read traps, nothing is written at all.  x12 is free here:
++	 * the code above parks x12..x15 in x0..x3 and says so.
++	 */
++	MOV64	x6, 0xff00ff00
++	SWEET_BAND_X 460, 16, x6
++	mrs		x12, ttbr0_el1
++	MOV64	x6, 0xffffffff
++	SWEET_BAND_X 460, 240, x6
++	msr		ttbr0_el1, x12
++	MOV64	x6, 0xff00ffff
++	SWEET_BAND_X 460, 464, x6
++#endif
++#if defined(SWEET)
+ 	/* whyred 1/2: translation only, I and C still off. */
+ 	MOV64	x0, (SCTLR_EL1_DEFAULT & ~(SCTLR_C_ENABLED | SCTLR_I_ENABLED))
+ #else
+@@ -1441,7 +1467,8 @@
+ 	 * notch in black -- and the band's own store is a framebuffer write under
+ 	 * the new translation regime, which is itself worth knowing about.
+ 	 */
+-	SWEET_BAND 460, 0xffffffff
++	MOV64	x6, 0xffffffff
++	SWEET_BAND_X 460, 688, x6
+ #endif
+ #if defined(SWEET)
+ 	/* whyred D: MMU and caches on (magenta) */

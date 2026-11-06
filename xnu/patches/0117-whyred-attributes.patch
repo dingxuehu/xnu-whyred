@@ -1,0 +1,130 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -1355,12 +1355,18 @@
+ 	ldr		x4, [x25]			/* L1[0] */
+ 	MOV64	x5, 0x0000FFFFFFFFC000		/* table address is bits[47:14] */
+ 	and		x5, x4, x5			/* -> the V=P L2 table */
+-	and		x9, x4, #0x3
+-	cmp		x9, #0x3			/* a table descriptor? */
+-	MOV64	x7, 0xff00ff00
+-	MOV64	x8, 0xff000000
+-	csel	x6, x7, x8, eq
+-	SWEET_BAND_X 640, 16, x6
++	/*
++	 * whyred 0117: what does the kernel block's descriptor actually say about
++	 * the memory?  0114 checked validity, the access flag, PXN and NX; all of
++	 * those are now known good, and the boot still stops at the first fetch
++	 * after SCTLR_EL1.M goes to 1.  AttrIndx[4:2] is the remaining field: it
++	 * selects a MAIR_EL1 entry, and if that entry is zero the block is
++	 * Device-nGnRnE, from which instruction fetch is UNPREDICTED.  Device
++	 * memory still accepts stores, which is why every mark before the MMU is
++	 * present, and the vector table lives in the same block, so a fault would
++	 * not be reported either.
++	 */
++	ldr		x4, [x5, #(88 * 8)]		/* the kernel's 32MB block */
+ 	/*
+ 	 * whyred 0115: no longer branch away when the descriptor does not look like
+ 	 * a table.  0114 did, so a read path that was wrong meant nothing was
+@@ -1397,16 +1403,57 @@
+ 	tst		x4, x9
+ 	csel	x6, x7, x8, ne
+ 	SWEET_BAND_X 640, 912, x6
+-	/* Make that block executable and publish the change to the walker. */
++	/* whyred 0117: AttrIndx bits 2..0, read before the fix below. */
++	ubfx	x9, x4, #2, #3
++	MOV64	x7, 0xff00ff00
++	MOV64	x8, 0xff000000
++	tst		x9, #0x4
++	csel	x6, x7, x8, ne
++	SWEET_BAND_X 640, 16, x6
++	tst		x9, #0x2
++	csel	x6, x7, x8, ne
++	SWEET_BAND_X 640, 240, x6
++	tst		x9, #0x1
++	csel	x6, x7, x8, ne
++	SWEET_BAND_X 640, 464, x6
++	/*
++	 * whyred 0117: is MAIR_EL1 entry 0 programmed at all?  Green means the
++	 * byte is non-zero, so AttrIndx 0 names a defined attribute; black means
++	 * it is zero, and with a zero MAIR_EL1 every index is Device-nGnRnE.
++	 */
++	mrs		x10, mair_el1
++	and		x9, x10, #0xff
++	MOV64	x7, 0xff00ff00
++	MOV64	x8, 0xff000000
++	cmp		x9, #0
++	csel	x6, x7, x8, ne
++	SWEET_BAND_X 640, 688, x6
++	/*
++	 * The smallest change that makes the attributes defined: force MAIR_EL1
++	 * entry 0 to 0xFF, Normal inner and outer write-back, leave the other
++	 * seven entries exactly as XNU set them, and point the kernel block at
++	 * entry 0.  A no-op if XNU already had it right, and it cannot disturb
++	 * the framebuffer, which is a different block.
++	 */
++	MOV64	x7, 0xffffffffffffff00
++	and		x10, x10, x7
++	orr		x10, x10, #0xff
++	msr		mair_el1, x10
++	isb		sy
++	/* Make that block executable and normally attributed, then publish it. */
+ 	MOV64	x7, 0xffdfffffffffffff		/* ~(1 << 53): clear PXN */
+ 	and		x4, x4, x7
+ 	MOV64	x7, 0xffbfffffffffffff		/* ~(1 << 54): clear NX */
+ 	and		x4, x4, x7
++	MOV64	x7, 0xffffffffffffffe3		/* ~(0x7 << 2): AttrIndx = 0 */
++	and		x4, x4, x7
+ 	str		x4, [x5, #(88 * 8)]
+ 	dsb		sy
+-	tlbi		vmalle1
++	tlbi	vmalle1
+ 	dsb		sy
+ 	isb		sy
++	MOV64	x6, 0xffffffff			/* the fix reached the end */
++	SWEET_BAND_X 640, 912, x6
+ .Lw0114_no_table:
+ 	/*
+ 	 * Arm the fault reporter before translation is enabled.  The kernel's own
+@@ -1421,32 +1468,6 @@
+ 	isb		sy
+ #endif
+ 	SWEET_BAND 360, 0xff7fff00
+-#endif
+-#if defined(SWEET)
+-	/*
+-	 * whyred 0116: is HCR_EL2.TVM trapping this kernel's system-register
+-	 * access?  At EL1, TVM sends reads of TTBR0_EL1, TTBR1_EL1 and TCR_EL1,
+-	 * and writes of those plus SCTLR_EL1, to EL2.  A trap taken to EL2 never
+-	 * reaches the reporter armed below, so it looks exactly like a hang --
+-	 * which is what 0114 and 0115 both looked like, and what the console
+-	 * supports: the shim printed SCTLR as 0x34544938, M=0, and only read it.
+-	 *
+-	 * Three narrow marks on row 460, before the SCTLR_EL1 write:
+-	 *   x=16   green : the probe was reached
+-	 *   x=240  white : the TTBR0_EL1 read returned
+-	 *   x=464  cyan  : the TTBR0_EL1 write returned
+-	 * The write puts back the value just read, so it is a no-op if it works,
+-	 * and if the read traps, nothing is written at all.  x12 is free here:
+-	 * the code above parks x12..x15 in x0..x3 and says so.
+-	 */
+-	MOV64	x6, 0xff00ff00
+-	SWEET_BAND_X 460, 16, x6
+-	mrs		x12, ttbr0_el1
+-	MOV64	x6, 0xffffffff
+-	SWEET_BAND_X 460, 240, x6
+-	msr		ttbr0_el1, x12
+-	MOV64	x6, 0xff00ffff
+-	SWEET_BAND_X 460, 464, x6
+ #endif
+ #if defined(SWEET)
+ 	/* whyred 1/2: translation only, I and C still off. */
+@@ -1468,7 +1489,7 @@
+ 	 * the new translation regime, which is itself worth knowing about.
+ 	 */
+ 	MOV64	x6, 0xffffffff
+-	SWEET_BAND_X 460, 688, x6
++	SWEET_BAND_X 460, 16, x6
+ #endif
+ #if defined(SWEET)
+ 	/* whyred D: MMU and caches on (magenta) */

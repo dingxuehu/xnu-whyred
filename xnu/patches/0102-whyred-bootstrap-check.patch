@@ -1,0 +1,66 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -828,6 +828,62 @@
+ #endif /* HAS_APPLE_PAC */
+ 
+ 	// Enable caches, MMU, ROP and JOP
++#if defined(SWEET)
++	/* whyred: table self-check, round 1 (see 0102 docstring). */
++	/*
++	 * whyred: walk the bootstrap tables by hand (MMU still off) and show the
++	 * result as green/red bands, so a broken mapping is visible instead of
++	 * looking like "the kernel stops when the MMU comes on".
++	 */
++	adrp	x1, EXT(bootstrap_pagetables)@page
++	add		x1, x1, EXT(bootstrap_pagetables)@pageoff
++	ldr		x2, [x1]					// L1 entry for VA 0..64GB
++	and		x3, x2, #0x3
++	cmp		x3, #0x3					// valid | table
++	b.ne	51f
++	SWEET_BAND 500, 0xff00ff00
++	b		52f
++51:	SWEET_BAND 500, 0xffff0000
++52:
++	and		x5, x2, #(ARM_TTE_TABLE_MASK)
++	add		x6, x1, #(2 * PGBYTES)
++	cmp		x5, x6
++	b.ne	53f
++	SWEET_BAND 520, 0xff00ff00
++	b		54f
++53:	SWEET_BAND 520, 0xffff0000
++54:
++	ldr		x7, [x6, #(88 * 8)]				// VA 0xb0000000 -> kernel block
++	and		x8, x7, #0x1
++	cmp		x8, #0x1
++	b.ne	55f
++	SWEET_BAND 540, 0xff00ff00
++	b		56f
++55:	SWEET_BAND 540, 0xffff0000
++56:
++	lsr		x9, x7, #25
++	cmp		x9, #0x58					// 0xb0000000 >> 25
++	b.ne	57f
++	SWEET_BAND 560, 0xff00ff00
++	b		58f
++57:	SWEET_BAND 560, 0xffff0000
++58:
++	ldr		x10, [x6, #(78 * 8)]			// VA 0x9c000000 -> framebuffer
++	and		x11, x10, #0x1
++	cmp		x11, #0x1
++	b.ne	59f
++	SWEET_BAND 580, 0xff00ff00
++	b		60f
++59:	SWEET_BAND 580, 0xffff0000
++60:
++	lsr		x12, x10, #25
++	cmp		x12, #0x4e					// 0x9c000000 >> 25
++	b.ne	61f
++	SWEET_BAND 600, 0xff00ff00
++	b		62f
++61:	SWEET_BAND 600, 0xffff0000
++62:
++#endif
+ #if defined(SWEET)
+ 	/* whyred C5: about to enable the MMU (orange) */
+ 	SWEET_BAND 340, 0xffff8000

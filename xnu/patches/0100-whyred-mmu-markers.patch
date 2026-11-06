@@ -1,0 +1,51 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -806,24 +806,47 @@
+ 
+ 	cbnz		x21, 1f
+ #endif /* __ARM_KERNEL_PROTECT__ */
++#if defined(SWEET)
++	/* whyred: diagnostic vectors until the MMU is on. */
++	adrp	x0, EXT(LowExceptionVectorBase)@page
++	add		x0, x0, EXT(LowExceptionVectorBase)@pageoff
++#else
+ 	adrp	x0, EXT(ExceptionVectorsBase)@page			// Load exception vectors base address
+ 	add		x0, x0, EXT(ExceptionVectorsBase)@pageoff
+ 	add		x0, x0, x22									// Convert exception vector address to KVA
+ 	sub		x0, x0, x23
++#endif
+ 1:
+ 	MSR_VBAR_EL1_X0
++#if defined(SWEET)
++	/* whyred C4: VBAR set, MMU still off (cyan) */
++	SWEET_BAND 320, 0xff00ffff
++#endif
+ 
+ #if HAS_APPLE_PAC
+ 	PAC_INIT_KEY_STATE tmp=x0, tmp2=x1
+ #endif /* HAS_APPLE_PAC */
+ 
+ 	// Enable caches, MMU, ROP and JOP
++#if defined(SWEET)
++	/* whyred C5: about to enable the MMU (orange) */
++	SWEET_BAND 340, 0xffff8000
++#endif
+ 	MOV64   x0, SCTLR_EL1_DEFAULT
+ 	MSR_SCTLR_EL1_X0
+ 	isb		sy
+ #if defined(SWEET)
+ 	/* whyred D: MMU and caches on (magenta) */
+ 	SWEET_BAND 240, 0xffff00ff
++#endif
++#if defined(SWEET)
++	/* whyred: real vectors from here on. */
++	adrp	x0, EXT(ExceptionVectorsBase)@page
++	add		x0, x0, x22
++	sub		x0, x0, x23
++	MSR_VBAR_EL1_X0
++	/* whyred D2: exception vectors restored (purple) */
++	SWEET_BAND 380, 0xff8000ff
+ #endif
+ 
+ #if !VMAPPLE && !defined(SWEET)

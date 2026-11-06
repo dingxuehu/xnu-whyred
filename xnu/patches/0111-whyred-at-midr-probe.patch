@@ -1,0 +1,79 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -1042,6 +1042,75 @@
+ 	tst		x9, #0x8
+ 	csel	x10, x12, x13, ne
+ 	SWEET_BAND_V 920, x10
++	/*
++	 * whyred 0111: two probes that 0104/0110 could not answer.  Appended at
++	 * the end of the 0110 block: after the 0104/0110 checks, before 0107/
++	 * 0109.  The band macro clobbers x6..x11 and preserves x12..x15, so the
++	 * colours and every value that must outlive a band live in x12..x15.
++	 *
++	 * PROBE A: which core are we actually executing on?  MIDR_EL1[3:0] is
++	 * the low nibble of the part number (0x3=A53, 0x5=A55, 0x7=A57, 0x8=A72,
++	 * 0x9=A73, 0xD=A76): rows 1400/1440/1480/1520 = bits 0/1/2/3, green = set.
++	 */
++	MOV64	x12, 0xff00ff00			// green
++	MOV64	x13, 0xff000000			// black
++	mrs		x14, midr_el1			// may UNDEF or trap to EL2
++	tst		x14, #0x1
++	csel	x10, x12, x13, ne		// green = part-number bit set
++	SWEET_BAND_V 1400, x10
++	tst		x14, #0x2
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 1440, x10
++	tst		x14, #0x4
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 1480, x10
++	tst		x14, #0x8
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 1520, x10
++	/*
++	 * PROBE B: can the hardware translate our own address right now?  AT
++	 * S1E1R walks the live stage-1 EL1 tables for the address of the very
++	 * next instruction and leaves the result in PAR_EL1 without raising a
++	 * translation fault: bit 0 = F (0 = the walk succeeded), bits [6:1] =
++	 * FST, bits [47:12] = the PA frame the walk produced.
++	 */
++	adr		x10, .Lw0111_at
++.Lw0111_at:
++	at		s1e1r, x10			// may UNDEF or trap to EL2
++	mrs		x15, par_el1			// survives the band macro
++	mov		x14, x10			// park the VA: the bands clobber x10
++	tst		x15, #0x1
++	csel	x10, x12, x13, eq		// green = F clear = walk succeeded
++	SWEET_BAND_V 1600, x10
++	ubfx	x11, x15, #1, #6		// FST; re-done below, a band clobbers x11
++	tst		x11, #0x1
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 1620, x10
++	ubfx	x11, x15, #1, #6
++	tst		x11, #0x2
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 1640, x10
++	ubfx	x11, x15, #1, #6
++	tst		x11, #0x4
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 1660, x10
++	ubfx	x11, x15, #1, #6
++	tst		x11, #0x8
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 1680, x10
++	ubfx	x11, x15, #1, #6
++	tst		x11, #0x10
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 1700, x10
++	ubfx	x11, x15, #1, #6
++	tst		x11, #0x20
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 1720, x10
++	lsr		x15, x15, #12			// PAR_EL1[47:12]; also drops F and FST
++	lsr		x11, x14, #12			// VA[47:12]; x10 is gone, VA parked in x14
++	cmp		x15, x11
++	csel	x10, x12, x13, eq		// green = PAR frame == VA frame
++	SWEET_BAND_V 1740, x10
+ #endif
+ #if defined(SWEET)
+ 	/*

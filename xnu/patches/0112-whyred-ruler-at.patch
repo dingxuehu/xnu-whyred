@@ -1,0 +1,158 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -908,6 +908,154 @@
+ .endm
+ #endif
+ 
++#if defined(SWEET)
++	/*
++	 * whyred 0112: these four additions run FIRST, before every other check in
++	 * this region.  Nothing below reads an ID register, so if a later ID read
++	 * (0104/0110/0111) hangs, the bands this block leaves on the panel are
++	 * still there to prove how far we got.
++	 *
++	 * Register discipline: x0..x11 are scratch, x16..x30 are never touched, and
++	 * x12..x15 are saved here on entry and restored at the end of the block, so
++	 * the surrounding code finds x12..x15 exactly as it left them.  x0..x3 hold
++	 * nothing but that saved copy, so nothing below may use them.
++	 */
++	mov		x0, x12			// save x12..x15: the probes need x12/x13 for
++	mov		x1, x13			// ... the colours and x14/x15 to park PAR_EL1
++	mov		x2, x14			// ... and the translated VA, so every later
++	mov		x3, x15			// ... addition must keep off x0..x3
++	/*
++	 * whyred 0112 (C): which exception level are we at?  CurrentEL is PSTATE,
++	 * not an ID register, so HCR_EL2.TID3 cannot trap this read.  One band,
++	 * colour-coded: green = EL1, cyan = EL2, magenta = EL3.  (EL0 would also
++	 * read green, but this code runs long after EL0 bring-up.)
++	 */
++	mrs		x9, currentel
++	ubfx	x9, x9, #2, #2			// CurrentEL[3:2] -> 1, 2, 3
++	cmp		x9, #0x2
++	MOV64	x10, 0xff00ff00			// green  = we are at EL1
++	MOV64	x11, 0xff00ffff			// cyan   = we are at EL2
++	MOV64	x12, 0xffff00ff			// magenta= we are at EL3
++	csel	x10, x11, x10, eq		// EL2 -> cyan
++	cmp		x9, #0x3
++	csel	x10, x12, x10, eq		// EL3 -> magenta (wins)
++	SWEET_BAND_V 2140, x10
++	/*
++	 * whyred 0112 (A): the row ruler.  18 full-width lines (all 1080 px), 4 rows
++	 * tall, at rows 600, 700, ... 2300 (the splash framebuffer is 1080x2400), so
++	 * a photograph can be read by COUNTING lines instead of measuring geometry.
++	 * All marks are green except the anchors 1000/1500/2000, which are blue.
++	 * Mark m is blue iff bit m of 0x4210 is set (m = 4, 9, 14).  The first store
++	 * address is the literal 0x9d400000 + 600*4320 and the loop only moves
++	 * upward, so no pixel above row 600 is ever written: rows 0..599 keep the
++	 * shim console.  The band above clobbered x6..x11, so x7/x8/x9 are fresh.
++	 */
++	MOV64	x4, (0x9d400000 + 600 * 4320)	// top row of the first mark
++	MOV64	x5, (96 * 4320)			// after 4 rows, the gap to the next mark
++	mov		x6, #18				// 18 marks: rows 600..2300
++	MOV64	x7, 0xff00ff00			// green
++	MOV64	x8, 0xff0000ff			// blue
++	MOV64	x9, 0x4210			// bit m set = mark m is blue: 4, 9, 14
++.Lw0112_ruler:
++	tst		x9, #0x1
++	csel	x10, x8, x7, ne		// blue at 1000/1500/2000, green elsewhere
++	mov		x11, #4320			// 4 rows x 1080 px, one word each
++.Lw0112_ruler_px:
++	str		w10, [x4], #4
++	subs	x11, x11, #1
++	b.ne	.Lw0112_ruler_px
++	add		x4, x4, x5			// top row of the next mark (100 rows on)
++	lsr		x9, x9, #1			// next mark's colour bit
++	subs	x6, x6, #1
++	b.ne	.Lw0112_ruler
++	dsb		sy
++	/*
++	 * whyred 0112 (B): ask the HARDWARE whether the framebuffer VA is mapped in
++	 * the live stage-1 EL1 tables, before any ID register is read.  AT S1E1R
++	 * walks those tables and leaves the outcome in PAR_EL1 (a fault only sets
++	 * PAR.F; it raises no exception), so this cannot kill the core the way a
++	 * trapping ID read can.  x12/x13 are the colours, x14 parks the VA and x15
++	 * holds PAR_EL1: SWEET_BAND_V clobbers only x6..x11, so all four survive,
++	 * and both paths paint their band.
++	 *
++	 * PROBE 1, the framebuffer base 0x9d400000: 1800 green = PAR_EL1.F == 0
++	 * (walk completed); 1840 green = PAR_EL1[47:12] == VA[47:12]; 1880 green =
++	 * PAR_EL1.FST bit 0 set.  PROBE 2, the address of the AT instruction
++	 * itself: 1920 green = F clear; 1960 green = PAR frame == VA frame.
++	 */
++	MOV64	x12, 0xff00ff00			// green = the hardware agrees
++	MOV64	x13, 0xff000000			// black = failure (red is invisible here)
++	MOV64	x10, 0x9d400000			// PROBE 1: the framebuffer base
++	at		s1e1r, x10
++	mrs		x15, par_el1
++	mov		x14, x10			// park the VA: the bands clobber x10
++	tst		x15, #0x1			// PAR_EL1.F: 0 = the walk completed
++	csel	x10, x12, x13, eq
++	SWEET_BAND_V 1800, x10
++	lsr		x11, x15, #12			// PAR_EL1[47:12]
++	lsr		x10, x14, #12			// VA[47:12]; x10 is gone, VA parked in x14
++	cmp		x11, x10
++	csel	x10, x12, x13, eq
++	SWEET_BAND_V 1840, x10
++	ubfx	x11, x15, #1, #6		// FST; re-extracted: a band clobbers x11
++	tst		x11, #0x1
++	csel	x10, x12, x13, ne
++	SWEET_BAND_V 1880, x10
++	adr		x10, .Lw0112_at		// PROBE 2: this instruction's own address
++.Lw0112_at:
++	at		s1e1r, x10
++	mrs		x15, par_el1
++	mov		x14, x10			// park the VA
++	tst		x15, #0x1
++	csel	x10, x12, x13, eq
++	SWEET_BAND_V 1920, x10
++	lsr		x11, x15, #12
++	lsr		x10, x14, #12
++	cmp		x11, x10
++	csel	x10, x12, x13, eq
++	SWEET_BAND_V 1960, x10
++	/*
++	 * whyred 0112 (D): is the framebuffer's own L2 block descriptor really in
++	 * the table the hardware walks, and is it usable?  The existing equivalent
++	 * checks paint RED on failure (invisible on the red splash), so this is the
++	 * first failure-VISIBLE test of that entry.  Same layout as the code above:
++	 * L1[0] of bootstrap_pagetables points at the V=P L2 table; the framebuffer
++	 * block for 0x9d400000 is the 32MB-aligned 0x9c000000, i.e. L2 index
++	 * 0x9c000000 >> 25 = 78, and the kernel's own block 0xb0000000 is index 88.
++	 * The descriptor carries ARM_TTE_BLOCK_PNX | ARM_TTE_BLOCK_NX, so a
++	 * "(entry >> 25) == 0x4e" test fails by construction and is NOT used: a
++	 * block descriptor is bits[1:0] == 0b01 (ARM_TTE_TYPE_BLOCK is 0x0,
++	 * ARM_TTE_VALID is 0x1) and AF is bit 10 (ARM_TTE_BLOCK_AF == 0x400).
++	 * x4/x5/x6, not x1/x2/x3: x0..x3 hold the saved x12..x15.
++	 */
++	MOV64	x12, 0xff00ff00			// green = pass
++	MOV64	x13, 0xff000000			// black = fail
++	adrp	x4, EXT(bootstrap_pagetables)@page
++	add		x4, x4, EXT(bootstrap_pagetables)@pageoff
++	ldr		x4, [x4]			// L1[0]
++	and		x5, x4, #(ARM_TTE_TABLE_MASK)	// -> the V=P L2 table
++	ldr		x6, [x5, #(78 * 8)]		// entry for the framebuffer block
++	and		x11, x6, #0x3
++	cmp		x11, #0x1			// valid | block
++	csel	x10, x12, x13, eq
++	SWEET_BAND_V 2060, x10
++	and		x11, x6, #0x400		// ARM_TTE_BLOCK_AF, used as a raw bit
++	cmp		x11, #0x400
++	csel	x10, x12, x13, eq
++	SWEET_BAND_V 2080, x10
++	ldr		x6, [x5, #(88 * 8)]		// control: the kernel's own block
++	and		x11, x6, #0x3
++	cmp		x11, #0x1
++	csel	x10, x12, x13, eq
++	SWEET_BAND_V 2120, x10
++	/* landmarks: cyan = everything above finished, white = older checks next. */
++	SWEET_BAND 2000, 0xff00ffff
++	SWEET_BAND 2040, 0xffffffff
++	mov		x12, x0			// restore x12..x15 for the surrounding code
++	mov		x13, x1
++	mov		x14, x2
++	mov		x15, x3
++#endif
+ #if defined(SWEET)
+ 	/*
+ 	 * whyred: where is the V=P L2 table, really?  Green = pass, black = fail.

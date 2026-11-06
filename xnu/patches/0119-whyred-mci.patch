@@ -1,0 +1,48 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -1470,13 +1470,42 @@
+ 	SWEET_BAND 360, 0xff7fff00
+ #endif
+ #if defined(SWEET)
+-	/* whyred 1/2: translation only, I and C still off. */
+-	MOV64	x0, (SCTLR_EL1_DEFAULT & ~(SCTLR_C_ENABLED | SCTLR_I_ENABLED))
++	/*
++	 * whyred 0119: enable the MMU with caches on, exactly as the working
++	 * port for this device does.  Until now this port cleared C and I here,
++	 * so every experiment since 0112 ran in a configuration that port never
++	 * uses, and the death has always been the fetch immediately after this
++	 * write.  M=1 with C=0 leaves the first fetch outside the cached path.
++	 */
++	MOV64	x0, SCTLR_EL1_DEFAULT
+ #else
+ 	MOV64   x0, SCTLR_EL1_DEFAULT
+ #endif
+ 	MSR_SCTLR_EL1_X0
+ 	isb		sy
++#ifdef	SWEET
++	/*
++	 * The first thing executed with M=1.  A bare store loop, the same shape
++	 * the working port uses for its post-MMU mark: no MOV64 beyond the base,
++	 * no nested macro, nothing that can hide a fetch fault behind its own
++	 * bookkeeping.  64 px wide, 32 rows tall, white, at row 460.
++	 */
++	MOV64	x6, (0x9d400000 + 460 * 4320)
++	mov		w7, #-1
++	mov		x9, #32
++	mov		x10, #4320
++.Lw0119_mark_row:
++	mov		x11, #64
++	mov		x12, x6
++.Lw0119_mark_px:
++	str		w7, [x12], #4
++	subs	x11, x11, #1
++	b.ne	.Lw0119_mark_px
++	add		x6, x6, x10
++	subs	x9, x9, #1
++	b.ne	.Lw0119_mark_row
++	dsb		sy
++#endif
+ #if defined(SWEET)
+ 	/*
+ 	 * whyred 0115: did the write itself return, and can the core still fetch?

@@ -1,0 +1,111 @@
+diff --git a/osfmk/arm64/start.s b/osfmk/arm64/start.s
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -1485,26 +1485,88 @@
+ 	isb		sy
+ #ifdef	SWEET
+ 	/*
+-	 * The first thing executed with M=1.  A bare store loop, the same shape
+-	 * the working port uses for its post-MMU mark: no MOV64 beyond the base,
+-	 * no nested macro, nothing that can hide a fetch fault behind its own
+-	 * bookkeeping.  64 px wide, 32 rows tall, white, at row 460.
+-	 */
+-	MOV64	x6, (0x9d400000 + 460 * 4320)
++	 * whyred 0120: separate "the MMU write hangs" from "the first mark
++	 * faults".  Every mark painted after the write is a store to 0x9d400000,
++	 * which is a physical address with the MMU off and a virtual one with M=1.
++	 * A missing mark therefore means either that the write never returned or
++	 * that this store took a translation fault, and nothing run so far can tell
++	 * those apart -- because every experiment reports its result through the
++	 * same framebuffer store it is testing.
++	 *
++	 * Three bounces, each of which turns the MMU on, does one more thing than
++	 * the last, clears M again and only then paints.  Nothing between the msr
++	 * and the clear touches memory except in bounce C, where that is the point.
++	 * Because M is clear again before each band is painted, every report goes
++	 * out over the physical framebuffer and cannot be what fails.
++	 *
++	 * 0115/0117 wrote M with the caches off and 0119 wrote M with them on, and
++	 * both died at the same place with a framebuffer store immediately after --
++	 * so "which of those is fatal" has never been separable either.
++	 *
++	 *   x=240  bounce A, M=1 with C and I still clear, no memory access
++	 *   x=464  bounce B, M|C|I, still no memory access
++	 *   x=688  bounce C, M|C|I plus one framebuffer store
++	 *
++	 *   green   = the msr returned and SCTLR.M read back set
++	 *   magenta = it returned but M did not stick
++	 *   gone    = that msr never returned
++	 */
++	MOV64	x15, 0x34544939			// M only: what 0115 and 0117 wrote
++	msr		sctlr_el1, x15
++	isb		sy
++	nop						// M=1 in force from here to the msr below
++	nop
++	nop
++	nop
++	mrs		x14, sctlr_el1
++	MOV64	x0, 0x34544938
++	MSR_SCTLR_EL1_X0
++	isb		sy
++	MOV64	x12, 0xff00ff00
++	MOV64	x13, 0xffff00ff
++	and		x14, x14, #1
++	cmp		x14, #1
++	csel	x12, x12, x13, eq
++	SWEET_BAND_X 460, 240, x12
++	/* Bounce B: the same, but with the caches on as well. */
++	MOV64	x15, SCTLR_EL1_DEFAULT
++	msr		sctlr_el1, x15
++	isb		sy
++	nop
++	nop
++	nop
++	nop
++	mrs		x14, sctlr_el1
++	MOV64	x0, 0x34544938
++	MSR_SCTLR_EL1_X0
++	isb		sy
++	MOV64	x12, 0xff00ff00
++	MOV64	x13, 0xffff00ff
++	and		x14, x14, #1
++	cmp		x14, #1
++	csel	x12, x12, x13, eq
++	SWEET_BAND_X 460, 464, x12
++	/*
++	 * Bounce C: the same again plus exactly one framebuffer store, the
++	 * operation under suspicion.  If the tables do not describe 0x9d400000
++	 * this faults, and the two bands above are already on the panel to say
++	 * that turning the MMU on worked.
++	 */
++	MOV64	x15, SCTLR_EL1_DEFAULT
++	msr		sctlr_el1, x15
++	isb		sy
++	MOV64	x6, 0x9d400000
+ 	mov		w7, #-1
+-	mov		x9, #32
+-	mov		x10, #4320
+-.Lw0119_mark_row:
+-	mov		x11, #64
+-	mov		x12, x6
+-.Lw0119_mark_px:
+-	str		w7, [x12], #4
+-	subs	x11, x11, #1
+-	b.ne	.Lw0119_mark_px
+-	add		x6, x6, x10
+-	subs	x9, x9, #1
+-	b.ne	.Lw0119_mark_row
+-	dsb		sy
++	str		w7, [x6]
++	MOV64	x0, 0x34544938
++	MSR_SCTLR_EL1_X0
++	isb		sy
++	MOV64	x12, 0xff00ff00
++	SWEET_BAND_X 460, 688, x12
++	/* Leave the MMU on, as 0119 did, so everything below keeps its meaning. */
++	MOV64	x0, SCTLR_EL1_DEFAULT
++	MSR_SCTLR_EL1_X0
++	isb		sy
+ #endif
+ #if defined(SWEET)
+ 	/*
